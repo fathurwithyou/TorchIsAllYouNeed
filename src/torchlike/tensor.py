@@ -13,6 +13,7 @@ def _to_array(data: Any) -> np.ndarray:
 
 
 def _unbroadcast(grad: np.ndarray, target_shape: tuple[int, ...]) -> np.ndarray:
+    # Collapse a broadcasted gradient back to the operand's original shape.
     if grad.shape == target_shape:
         return grad
 
@@ -42,6 +43,7 @@ class Tensor:
             np.zeros_like(self.data) if self.requires_grad else None
         )
         self._backward = lambda: None
+        # Parents in the dynamic computation graph built during forward pass.
         self._prev = set(_children)
         self._op = _op
 
@@ -109,6 +111,7 @@ class Tensor:
         def _backward() -> None:
             if out.grad is None:
                 return
+            # d(self + other)/dself = 1 and d(self + other)/dother = 1.
             if self.requires_grad and self.grad is not None:
                 self.grad += _unbroadcast(out.grad, self.shape)
             if other_t.requires_grad and other_t.grad is not None:
@@ -137,6 +140,7 @@ class Tensor:
         def _backward() -> None:
             if out.grad is None:
                 return
+            # If y = -x, then dL/dx = dL/dy * (-1).
             if self.requires_grad and self.grad is not None:
                 self.grad -= out.grad
 
@@ -155,6 +159,7 @@ class Tensor:
         def _backward() -> None:
             if out.grad is None:
                 return
+            # Product rule with shape correction when NumPy broadcasting was used.
             if self.requires_grad and self.grad is not None:
                 self.grad += _unbroadcast(out.grad * other_t.data, self.shape)
             if other_t.requires_grad and other_t.grad is not None:
@@ -178,6 +183,9 @@ class Tensor:
         def _backward() -> None:
             if out.grad is None:
                 return
+            # If y = x / b, then:
+            # dL/dx = dL/dy * (1 / b)
+            # dL/db = dL/dy * (-x / b^2)
             if self.requires_grad and self.grad is not None:
                 self.grad += _unbroadcast(out.grad / other_t.data, self.shape)
             if other_t.requires_grad and other_t.grad is not None:
@@ -203,6 +211,7 @@ class Tensor:
         def _backward() -> None:
             if out.grad is None:
                 return
+            # If y = x^a for constant a, then dL/dx = dL/dy * a * x^(a-1).
             if self.requires_grad and self.grad is not None:
                 self.grad += out.grad * (exponent * self.data ** (exponent - 1.0))
 
@@ -221,6 +230,8 @@ class Tensor:
         def _backward() -> None:
             if out.grad is None:
                 return
+            # For z = x @ w:
+            # dL/dx = dL/dz @ w^T and dL/dw = x^T @ dL/dz.
             if self.requires_grad and self.grad is not None:
                 self.grad += out.grad @ other_t.data.T
             if other_t.requires_grad and other_t.grad is not None:
@@ -247,11 +258,13 @@ class Tensor:
 
             grad = out.grad
             if axis is None:
+                # If y = sum(x), each x_i contributes with local derivative 1.
                 grad = np.ones_like(self.data) * grad
             else:
                 axes = axis if isinstance(axis, tuple) else (axis,)
                 expanded = grad
                 if not keepdims:
+                    # Reinsert removed axes before broadcasting back to input shape.
                     for ax in sorted(axes):
                         expanded = np.expand_dims(expanded, ax)
                 grad = np.ones_like(self.data) * expanded
@@ -263,6 +276,7 @@ class Tensor:
     def mean(
         self, axis: int | tuple[int, ...] | None = None, keepdims: bool = False
     ) -> Tensor:
+        # mean(x) is implemented as sum(x) / N, so backward reuses both rules.
         if axis is None:
             denom = self.data.size
         elif isinstance(axis, tuple):
@@ -282,6 +296,7 @@ class Tensor:
         def _backward() -> None:
             if out.grad is None:
                 return
+            # If y = log(x), then dL/dx = dL/dy * 1/x.
             if self.requires_grad and self.grad is not None:
                 self.grad += out.grad / self.data
 
@@ -299,6 +314,7 @@ class Tensor:
         def _backward() -> None:
             if out.grad is None:
                 return
+            # If y = exp(x), then dL/dx = dL/dy * exp(x).
             if self.requires_grad and self.grad is not None:
                 self.grad += out.grad * out.data
 
@@ -317,6 +333,7 @@ class Tensor:
         def _backward() -> None:
             if out.grad is None:
                 return
+            # If y = tanh(x), then dL/dx = dL/dy * (1 - tanh(x)^2).
             if self.requires_grad and self.grad is not None:
                 self.grad += out.grad * (1.0 - t**2)
 
@@ -335,6 +352,7 @@ class Tensor:
         def _backward() -> None:
             if out.grad is None:
                 return
+            # ReLU has local derivative 1 for x > 0 and 0 otherwise.
             if self.requires_grad and self.grad is not None:
                 self.grad += out.grad * (self.data > 0.0)
 
@@ -354,6 +372,7 @@ class Tensor:
         def _backward() -> None:
             if out.grad is None:
                 return
+            # If y = sigmoid(x), then dL/dx = dL/dy * y * (1 - y).
             if self.requires_grad and self.grad is not None:
                 self.grad += out.grad * s * (1.0 - s)
 
@@ -376,6 +395,8 @@ class Tensor:
                 return
             if not self.requires_grad or self.grad is None:
                 return
+            # Jacobian-vector product for softmax:
+            # dL/dx = s * (g - sum(g * s)), with g = dL/ds along the softmax axis.
             self.grad += s * (out.grad - np.sum(out.grad * s, axis=axis, keepdims=True))
 
         out._backward = _backward
@@ -394,6 +415,7 @@ class Tensor:
             if out.grad is None:
                 return
             if self.requires_grad and self.grad is not None:
+                # Clamp is locally identity inside [min_value, max_value] and flat outside.
                 mask = (self.data >= min_value) & (self.data <= max_value)
                 self.grad += out.grad * mask
 
@@ -407,6 +429,7 @@ class Tensor:
         if grad is None:
             if self.data.size != 1:
                 raise RuntimeError("grad must be specified for non-scalar tensor")
+            # For a scalar output y, backward starts with dy/dy = 1.
             grad = np.ones_like(self.data)
 
         self.grad = self.grad + grad if self.grad is not None else grad
@@ -423,7 +446,9 @@ class Tensor:
                 build(child)
             topo.append(node)
 
+        # Build a topological order so every node is visited after its children.
         build(self)
 
+        # Reverse traversal applies the chain rule from output back to leaves.
         for node in reversed(topo):
             node._backward()
