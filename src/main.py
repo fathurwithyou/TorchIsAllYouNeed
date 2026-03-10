@@ -269,6 +269,35 @@ def train_experiment(
     )
 
 
+def save_and_reload_demo_model(
+    output_path: Path,
+    *,
+    input_dim: int = 4,
+    hidden_dim: int = 2,
+) -> nn.Sequential:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    demo_model = nn.Sequential(
+        [
+            nn.Linear(input_dim, hidden_dim, init="uniform", seed=101),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1, init="uniform", seed=103),
+        ]
+    )
+    demo_input = Tensor(
+        np.linspace(-0.3, 0.3, input_dim, dtype=np.float64).reshape(1, -1)
+    )
+    original_logits = demo_model(demo_input).data.copy()
+
+    demo_model.save(output_path)
+    loaded_model = nn.Sequential.load(output_path)
+    reloaded_logits = loaded_model(demo_input).data
+    if not np.allclose(original_logits, reloaded_logits):
+        raise ValueError("Loaded demo model does not match the saved model")
+
+    return loaded_model
+
+
 def linear_layers(model: nn.Sequential) -> list[nn.Module]:
     return [
         layer
@@ -412,6 +441,12 @@ def train_on_dataset(csv_path: Path) -> None:
 
     reports_dir = Path("reports")
     reports_dir.mkdir(parents=True, exist_ok=True)
+    demo_checkpoint_path = reports_dir / "tiny.pkl"
+    save_and_reload_demo_model(
+        demo_checkpoint_path,
+        input_dim=min(4, x_train.shape[1]),
+        hidden_dim=2,
+    )
 
     sgd_no_norm = train_experiment(
         name="SGD-NoNorm",
@@ -476,7 +511,7 @@ def train_on_dataset(csv_path: Path) -> None:
     summarize_optimizer_speed(sgd_no_norm, adam_no_norm)
 
     print("\nSaved artifacts:")
-    for report_path in report_paths:
+    for report_path in [*report_paths, demo_checkpoint_path]:
         print(f"- {report_path}")
 
 
