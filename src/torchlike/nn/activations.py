@@ -6,6 +6,11 @@ from torchlike.tensor import Tensor
 from .module import Module
 
 
+class Identity(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        return x
+
+
 class ReLU(Module):
     def forward(self, x: Tensor) -> Tensor:
         return F.relu(x)
