@@ -46,7 +46,7 @@ Perintah di atas akan:
 
 Alternatif:
 
-- buka notebook `experiments_global_student_placement_and_salary.ipynb`
+- buka notebook `experiments.ipynb`
 - jalankan sel eksperimen secara interaktif
 
 Catatan: meskipun file utamanya ada di folder `src`, sebaiknya jangan menjalankan `python main.py` langsung dari dalam folder tersebut karena script memakai path relatif terhadap root repositori.
