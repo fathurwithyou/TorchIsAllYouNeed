@@ -204,5 +204,46 @@ class TestSequential(unittest.TestCase):
             model.plot_gradient_distribution([0, 1])
 
 
+class TestFFNN(unittest.TestCase):
+    def test_builds_from_layer_sizes_and_activation_names(self):
+        model = nn.FFNN(
+            [3, 4, 2],
+            activations=["relu", "softmax"],
+            init="uniform",
+            seed=7,
+        )
+        self.assertEqual(model.layer_sizes, [3, 4, 2])
+        self.assertEqual(len(model.layers), 4)
+        self.assertIsInstance(model.layers[0], nn.Linear)
+        self.assertIsInstance(model.layers[1], nn.ReLU)
+        self.assertIsInstance(model.layers[2], nn.Linear)
+        self.assertIsInstance(model.layers[3], nn.Softmax)
+
+    def test_linear_activation_and_autodiff(self):
+        model = nn.FFNN([2, 3, 1], activations=["linear", None], init="normal", seed=3)
+        x = Tensor(np.array([[0.5, -1.5], [1.0, 2.0]]), requires_grad=True)
+        target = Tensor(np.array([[0.0], [1.0]]))
+
+        out = model(x)
+        self.assertEqual(out.shape, (2, 1))
+
+        loss = nn.MSELoss()(out, target)
+        loss.backward()
+
+        for param in model.parameters():
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(param.grad.shape, param.data.shape)
+
+    def test_validation_errors(self):
+        with self.assertRaises(ValueError):
+            nn.FFNN([4])
+        with self.assertRaises(ValueError):
+            nn.FFNN([2, 0, 1])
+        with self.assertRaises(ValueError):
+            nn.FFNN([2, 3, 1], activations=["relu"])
+        with self.assertRaises(ValueError):
+            nn.FFNN([2, 3, 1], activations=["unknown", None])
+
+
 if __name__ == "__main__":
     unittest.main()

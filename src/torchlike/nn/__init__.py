@@ -1,4 +1,5 @@
-from .activations import GELU, ReLU, SELU, Sigmoid, Softmax, Tanh
+from .activations import GELU, Identity, ReLU, SELU, Sigmoid, Softmax, Tanh
+from .ffnn import FFNN
 from .linear import Linear
 from .loss import BCELoss, CrossEntropyLoss, MSELoss, BCEWithLogitsLoss
 from .module import Module
@@ -9,6 +10,8 @@ __all__ = [
     "Module",
     "Linear",
     "Sequential",
+    "FFNN",
+    "Identity",
     "ReLU",
     "Sigmoid",
     "Tanh",
