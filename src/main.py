@@ -441,7 +441,7 @@ def train_on_dataset(csv_path: Path) -> None:
 
     reports_dir = Path("reports")
     reports_dir.mkdir(parents=True, exist_ok=True)
-    demo_checkpoint_path = reports_dir / "tiny.pkl"
+    demo_checkpoint_path = reports_dir / "tiny_persistence_demo.pkl"
     save_and_reload_demo_model(
         demo_checkpoint_path,
         input_dim=min(4, x_train.shape[1]),
