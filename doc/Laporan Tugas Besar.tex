@@ -784,7 +784,7 @@ Keterkaitannya dengan implementasi bersifat langsung. Kelas \texttt{Linear} memb
 
 \subsection{Mekanisme Automatic Differentiation}
 \label{subsec:autodiff}
-Automatic differentiation pada sistem ini menggunakan reverse-mode AD pada graph komputasi berarah tanpa siklus $G=(V,E)$. Setiap operasi diferensiabel yang menghasilkan \texttt{Tensor} baru akan membentuk node baru yang menyimpan tiga hal: nilai maju, himpunan parent $\mathrm{pa}(v)$ melalui \texttt{\_prev}, dan operator gradien lokal melalui \texttt{\_backward}. Karena graph dibangun mengikuti urutan eksekusi program yang benar-benar terjadi, mekanisme ini bersifat \textit{define-by-run} dan sejalan dengan formulasi autodiff modern berbasis graph komputasi dinamis \citep{baydin2018ad,paszke2019pytorch,karpathyMicrograd}.
+Automatic differentiation pada sistem ini menggunakan reverse-mode AD pada graph komputasi berarah tanpa siklus $G=(V,E)$. Setiap operasi diferensiabel yang menghasilkan \texttt{Tensor} baru akan membentuk node baru yang menyimpan tiga hal: nilai maju, himpunan parent $\mathrm{pa}(v)$ melalui \texttt{\_prev}, dan operator gradien lokal melalui \texttt{\_backward}. Karena graph dibangun mengikuti urutan eksekusi program yang benar-benar terjadi, mekanisme ini bersifat \textit{define-by-run} dan sejalan dengan formulasi autodiff modern berbasis graph komputasi dinamis \citep{baydin2018ad,paszke2019pytorch}.
 
 Secara matematis, reverse-mode AD menghitung \textit{vector-Jacobian product} dari output skalar ke seluruh node antara. Untuk \textit{loss} skalar $\mathcal{L}$ dan node antara $u$, gradien global memenuhi
 \begin{equation}
@@ -1047,7 +1047,7 @@ x_val = preprocessor.transform(x_val_raw).astype(np.float64)
 \end{lstlisting}
 Label target dibentuk sebagai biner 0/1, lalu data dipecah menjadi train dan validation dengan seed tetap. \texttt{ColumnTransformer} memisahkan fitur numerik dan kategorikal; \texttt{StandardScaler} di-fit hanya pada train, sedangkan \texttt{OneHotEncoder(handle\_unknown="ignore")} menjaga pipeline tetap aman jika validation memuat kategori yang tidak muncul pada train. Urutan \texttt{fit\_transform} pada train dan \texttt{transform} pada validation penting untuk menjaga evaluasi tetap bebas dari \textit{data leakage}.
 
-Siklus pelatihan per \textit{mini-batch} adalah: \textit{forward} $\rightarrow$ \textit{loss} $\rightarrow$ \texttt{optimizer.zero\_grad()} $\rightarrow$ \texttt{loss.backward()} $\rightarrow$ \texttt{optimizer.step()}. Riwayat \textit{train loss} dan \textit{validation loss} disimpan per epoch untuk analisis konvergensi. Selain itu, framework juga menyediakan persistensi model (\texttt{Module.save/load}) dan persistensi optimizer (\texttt{state\_dict/load\_state\_dict}) agar eksperimen bisa direproduksi atau dilanjutkan.
+Pada setiap \textit{mini-batch}, data terlebih dahulu dilewatkan ke model untuk menghasilkan prediksi lalu dihitung \textit{loss}-nya. Setelah itu, gradien lama dibersihkan dengan \texttt{optimizer.zero\_grad()}, kemudian \texttt{loss.backward()} dipanggil untuk menghitung gradien baru, dan akhirnya \texttt{optimizer.step()} digunakan untuk memperbarui parameter model. Riwayat \textit{train loss} dan \textit{validation loss} tetap disimpan pada setiap epoch agar proses konvergensi bisa diamati dengan jelas. Selain itu, framework juga menyediakan persistensi model melalui \texttt{Module.save/load} serta persistensi optimizer melalui \texttt{state\_dict/load\_state\_dict} agar eksperimen dapat direproduksi atau dilanjutkan.
 
 \noindent\textbf{Loop pelatihan pada \texttt{train\_experiment} di \texttt{src/main.py}}\par
 \begin{lstlisting}
@@ -1528,11 +1528,6 @@ scikit-learn Contributors.
 scikit-learn Contributors.
 \newblock MLPClassifier documentation.
 \newblock scikit-learn documentation. Available at \url{https://scikit-learn.org/stable/modules/generated/sklearn.neural_network.MLPClassifier.html}. Accessed March 6, 2026.
-
-\bibitem{karpathyMicrograd}
-Andrej Karpathy.
-\newblock The spelled-out intro to neural networks and backpropagation: building micrograd.
-\newblock Video lecture and accompanying educational implementation, 2022.
 
 \bibitem{bartlett2006convexity}
 Peter~L. Bartlett, Michael~I. Jordan, and Jon~D. McAuliffe.
