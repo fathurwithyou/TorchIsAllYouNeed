@@ -173,6 +173,10 @@ class FFNN(Module):
 \end{lstlisting}
 \texttt{Linear} menangani inisialisasi bobot sekaligus operasi affine dasar. \texttt{Sequential} mengatur alur eksekusi layer secara deklaratif dari awal sampai akhir. Di atasnya, \texttt{FFNN} menyusun beberapa layer linear dan aktivasi menjadi arsitektur yang siap dipakai di eksperimen. Jadi, pada notebook terbaru, sebagian besar studi memakai \texttt{FFNN} sebagai antarmuka utama, sedangkan \texttt{Sequential} tetap dipakai ketika susunan layer perlu dirakit lebih manual.
 
+Secara lebih spesifik, kelas-kelas pada bagian ini dipakai dengan cara yang saling melengkapi. Sebuah layer linear dapat diinisialisasi dengan bentuk seperti \texttt{fc1 = nn.Linear(28, 32, init="he", seed=7)}. Modul aktivasi dapat dibuat secara langsung, misalnya \texttt{act1 = nn.GELU()} atau \texttt{act2 = nn.SELU()}. Jika ingin merakit arsitektur secara manual, modul-modul tersebut dapat digabungkan lewat \texttt{Sequential}, misalnya \texttt{network = nn.Sequential([nn.Linear(28, 32, init="he", seed=7), nn.GELU(), nn.Linear(32, 1, init="he", seed=11)])}. Sementara itu, kelas \texttt{FFNN} menyediakan cara yang lebih ringkas karena menerima daftar ukuran layer seperti \texttt{[d\_in, h\_1, h\_2, \dots, d\_out]} lalu membangun pasangan \texttt{Linear} dan aktivasi secara otomatis untuk setiap transisi antarlayer. Contoh inisialisasinya dapat ditulis sebagai \texttt{model = nn.FFNN([28, 32, 32, 32, 1], activations=["gelu", "selu", "gelu", None], init="he", seed=123)}. Pada contoh ini, model menerima 28 fitur masukan, memakai tiga hidden layer berukuran 32, dan menghasilkan satu logit pada layer keluaran. Jika daftar aktivasi diberikan, setiap elemen pada daftar itu dipetakan ke modul aktivasi yang sesuai, misalnya \texttt{"gelu"} menjadi \texttt{GELU()} atau \texttt{"tanh"} menjadi \texttt{Tanh()}. Kelas ini juga memeriksa agar jumlah aktivasi konsisten dengan jumlah layer non-input, meneruskan pengaturan \texttt{bias} ke setiap layer linear, serta membangkitkan seed turunan untuk tiap layer agar inisialisasi tetap acak tetapi masih bisa direproduksi. Dengan cara ini, eksperimen dapat mendefinisikan arsitektur cukup dari daftar dimensi dan nama aktivasi tanpa menulis ulang susunan layer secara manual.
+
+Jika dibaca dari potongan kodenya, bagian \texttt{\_\_init\_\_()} dimulai dengan menyiapkan list kosong bernama \texttt{layers}. Setelah itu, kode melakukan iterasi pada pasangan \texttt{(in\_features, out\_features)} untuk setiap transisi layer. Pada setiap iterasi, sebuah \texttt{Linear} ditambahkan lebih dulu ke dalam list. Berikutnya, jika spesifikasi aktivasi pada posisi itu tidak bernilai \texttt{None}, fungsi bantu \texttt{\_clone\_activation()} akan mengubah nama aktivasi menjadi objek modul yang sesuai lalu menambahkannya setelah layer linear. Setelah seluruh susunan selesai, list tersebut dibungkus menjadi \texttt{self.network = Sequential(layers)}. Method \texttt{forward()} kemudian dibuat sangat ringkas karena tugasnya hanya meneruskan input \texttt{x} ke \texttt{self.network}. Desain seperti ini membuat logika perakitan arsitektur dipusatkan di konstruktor, sedangkan komputasi maju tetap sederhana dan mudah dibaca.
+
 \noindent\textbf{Catatan transisi optimizer}\par
 Implementasi detail update bobot sengaja dipusatkan pada Subbagian~\ref{subsec:optimizer} agar pembahasan tidak berulang. Bagian ini hanya memperlihatkan struktur model dan loop pelatihan tingkat tinggi.
 
@@ -212,20 +216,25 @@ Struktur ini memisahkan tanggung jawab tiap bagian secara cukup bersih. Folder \
 \noindent\textbf{Alur pelatihan pada \texttt{main.py}}\par
 \begin{lstlisting}
 x_train, x_val, y_train, y_val = load_dataset_features(csv_path)
-train_loader = DataLoader(ArrayDataset(x_train, y_train), batch_size=256, shuffle=True)
+train_dataset = ArrayDataset(x_train, y_train)
+train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True, seed=123)
 
-model = build_binary_model(x_train.shape[1], use_rmsnorm=True, init="he")
+model = build_binary_model(x_train.shape[1], use_rmsnorm=False, init="he")
 criterion = nn.BCEWithLogitsLoss()
-optimizer = create_optimizer("adam", model)
+optimizer = create_optimizer("sgd", model)
 
-for xb, yb in train_loader:
-    logits = model(xb)
-    loss = criterion(logits, yb)
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+for epoch in range(epochs):
+    for xb, yb in train_loader:
+        logits = model(xb)
+        loss = criterion(logits, yb)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    train_loss, _, _, _ = evaluate_binary(model, x_train, y_train, criterion)
+    val_loss, val_acc, _, _ = evaluate_binary(model, x_val, y_val, criterion)
 \end{lstlisting}
-Potongan ini menunjukkan urutan minimum yang dipakai di seluruh eksperimen: siapkan data, bangun model, hitung \textit{loss}, lakukan \textit{backward}, lalu perbarui parameter. Karena polanya konsisten, studi ablation dapat dilakukan cukup dengan mengganti pembangun model atau konfigurasi optimizer tanpa menulis ulang loop pelatihan.
+Potongan ini lebih dekat dengan alur yang benar-benar dipakai pada fungsi \texttt{train\_experiment}. Data train lebih dulu dibungkus ke \texttt{ArrayDataset} lalu diiterasikan oleh \texttt{DataLoader}. Setelah model, \textit{loss}, dan optimizer dibuat, parameter diperbarui pada level \textit{mini-batch}. Sesudah seluruh batch pada satu epoch selesai diproses, model dievaluasi ulang pada seluruh data train dan validation melalui \texttt{evaluate\_binary}. Pola ini membuat eksperimen tetap konsisten karena perubahan arsitektur atau optimizer tidak mengubah struktur loop pelatihan utamanya.
 
 \subsection{Forward Propagation}
 \label{subsec:forward}
@@ -1047,7 +1056,7 @@ x_val = preprocessor.transform(x_val_raw).astype(np.float64)
 \end{lstlisting}
 Label target dibentuk sebagai biner 0/1, lalu data dipecah menjadi train dan validation dengan seed tetap. \texttt{ColumnTransformer} memisahkan fitur numerik dan kategorikal; \texttt{StandardScaler} di-fit hanya pada train, sedangkan \texttt{OneHotEncoder(handle\_unknown="ignore")} menjaga pipeline tetap aman jika validation memuat kategori yang tidak muncul pada train. Urutan \texttt{fit\_transform} pada train dan \texttt{transform} pada validation penting untuk menjaga evaluasi tetap bebas dari \textit{data leakage}.
 
-Pada setiap \textit{mini-batch}, data terlebih dahulu dilewatkan ke model untuk menghasilkan prediksi lalu dihitung \textit{loss}-nya. Setelah itu, gradien lama dibersihkan dengan \texttt{optimizer.zero\_grad()}, kemudian \texttt{loss.backward()} dipanggil untuk menghitung gradien baru, dan akhirnya \texttt{optimizer.step()} digunakan untuk memperbarui parameter model. Riwayat \textit{train loss} dan \textit{validation loss} tetap disimpan pada setiap epoch agar proses konvergensi bisa diamati dengan jelas. Selain itu, framework juga menyediakan persistensi model melalui \texttt{Module.save/load} serta persistensi optimizer melalui \texttt{state\_dict/load\_state\_dict} agar eksperimen dapat direproduksi atau dilanjutkan.
+Pada setiap \textit{mini-batch}, data terlebih dahulu dilewatkan ke model untuk menghasilkan prediksi lalu dihitung \textit{loss}-nya. Setelah itu, gradien lama dibersihkan dengan \texttt{optimizer.zero\_grad()}, kemudian \texttt{loss.backward()} dipanggil untuk menghitung gradien baru, dan akhirnya \texttt{optimizer.step()} digunakan untuk memperbarui parameter model. Sesudah satu epoch selesai, fungsi \texttt{evaluate\_binary()} dipakai untuk menghitung kembali \textit{train loss}, \textit{validation loss}, dan akurasi validasi pada seluruh data. Nilai-nilai ini disimpan per epoch agar proses konvergensi bisa diamati dengan jelas. Implementasi \texttt{train\_experiment()} juga menyimpan parameter terbaik berdasarkan \textit{validation loss}, menerapkan \textit{early stopping} jika tidak ada perbaikan yang cukup lama, lalu memulihkan kembali parameter terbaik sebelum evaluasi akhir. Di bagian paling akhir, fungsi \texttt{attach\_full\_batch\_gradients()} dipanggil agar gradien pada model akhir tersedia untuk analisis distribusi bobot dan gradien.
 
 \noindent\textbf{Loop pelatihan pada \texttt{train\_experiment} di \texttt{src/main.py}}\par
 \begin{lstlisting}
@@ -1065,8 +1074,12 @@ for epoch in range(epochs):
     train_losses.append(train_loss)
     val_losses.append(val_loss)
     val_accs.append(val_acc)
+
+    if val_loss < best_val_loss - min_delta:
+        best_params = [p.data.copy() for p in model.parameters()]
+        best_epoch = epoch + 1
 \end{lstlisting}
-Potongan ini merupakan implementasi langsung dari prosedur pelatihan \textit{mini-batch} yang dipakai pada eksperimen. Struktur loop-nya memperlihatkan dengan jelas perbedaan antara pembaruan parameter di level batch dan evaluasi metrik di level epoch.
+Potongan ini merupakan implementasi langsung dari prosedur pelatihan \textit{mini-batch} yang dipakai pada eksperimen. Struktur loop-nya memperlihatkan dengan jelas perbedaan antara pembaruan parameter di level batch dan evaluasi metrik di level epoch. Cuplikan ini juga menunjukkan bahwa proses training tidak berhenti pada update parameter saja. Kode sekaligus melacak epoch terbaik berdasarkan \textit{validation loss} agar model akhir yang dipakai untuk analisis berasal dari parameter terbaik yang sempat ditemukan selama pelatihan.
 
 \subsection{Analisis Distribusi Bobot dan Gradien}
 \label{subsec:distplot}
@@ -1439,25 +1452,10 @@ Gunter Klambauer, Thomas Unterthiner, Andreas Mayr, and Sepp Hochreiter.
 \newblock Self-Normalizing Neural Networks.
 \newblock In \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2017.
 
-\bibitem{nair2010relu}
-Vinod Nair and Geoffrey E. Hinton.
-\newblock Rectified Linear Units Improve Restricted Boltzmann Machines.
-\newblock In \emph{Proceedings of the 27th International Conference on Machine Learning (ICML)}, 2010.
-
 \bibitem{ba2016layernorm}
 Jimmy Lei Ba, Jamie Ryan Kiros, and Geoffrey E. Hinton.
 \newblock Layer Normalization.
 \newblock \emph{arXiv preprint arXiv:1607.06450}, 2016.
-
-\bibitem{wengert1964ad}
-Robert E. Wengert.
-\newblock A simple automatic derivative evaluation program.
-\newblock \emph{Communications of the ACM}, 7(8):463--464, 1964.
-
-\bibitem{linnainmaa1976taylor}
-Seppo Linnainmaa.
-\newblock Taylor expansion of the accumulated rounding error.
-\newblock \emph{BIT Numerical Mathematics}, 16(2):146--160, 1976.
 
 \bibitem{werbos1974thesis}
 Paul J. Werbos.
@@ -1473,16 +1471,6 @@ David E. Rumelhart, Geoffrey E. Hinton, and Ronald J. Williams.
 Atilim Gunes Baydin, Barak A. Pearlmutter, Alexey Andreyevich Radul, and Jeffrey Mark Siskind.
 \newblock Automatic Differentiation in Machine Learning: a Survey.
 \newblock \emph{Journal of Machine Learning Research}, 18(153):1--43, 2018.
-
-\bibitem{robbins1951sa}
-Herbert Robbins and Sutton Monro.
-\newblock A Stochastic Approximation Method.
-\newblock \emph{The Annals of Mathematical Statistics}, 22(3):400--407, 1951.
-
-\bibitem{bottou2012tricks}
-Leon Bottou.
-\newblock Stochastic Gradient Descent Tricks.
-\newblock In Gr\'egoire Montavon, Genevieve Orr, and Klaus-Robert Muller, editors, \emph{Neural Networks: Tricks of the Trade}, pages 421--436. Springer, 2012.
 
 \bibitem{tibshirani1996lasso}
 Robert Tibshirani.
@@ -1529,10 +1517,6 @@ scikit-learn Contributors.
 \newblock MLPClassifier documentation.
 \newblock scikit-learn documentation. Available at \url{https://scikit-learn.org/stable/modules/generated/sklearn.neural_network.MLPClassifier.html}. Accessed March 6, 2026.
 
-\bibitem{bartlett2006convexity}
-Peter~L. Bartlett, Michael~I. Jordan, and Jon~D. McAuliffe.
-\newblock Convexity, Classification, and Risk Bounds.
-\newblock \emph{Journal of the American Statistical Association}, 101(473):138--156, 2006.
 \end{thebibliography}
 
 \end{document}
