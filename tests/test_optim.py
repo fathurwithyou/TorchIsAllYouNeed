@@ -69,6 +69,29 @@ class TestBaseOptimizer(unittest.TestCase):
         with self.assertRaises(ValueError):
             opt2.load_state_dict({"state": {}, "param_groups": []})
 
+    def test_load_state_dict_rejects_group_count_mismatch(self):
+        p1 = Tensor(np.array([1.0]), requires_grad=True)
+        p2 = Tensor(np.array([2.0]), requires_grad=True)
+        opt = DummyOptimizer([p1])
+        opt.add_param_group({"params": [p2], "lr": 0.2})
+
+        bad_state = opt.state_dict()
+        bad_state["param_groups"] = bad_state["param_groups"][:1]
+
+        with self.assertRaises(ValueError):
+            opt.load_state_dict(bad_state)
+
+    def test_load_state_dict_rejects_group_size_mismatch(self):
+        p1 = Tensor(np.array([1.0]), requires_grad=True)
+        p2 = Tensor(np.array([2.0]), requires_grad=True)
+        opt = DummyOptimizer([p1, p2])
+
+        bad_state = opt.state_dict()
+        bad_state["param_groups"][0]["params"] = [0]
+
+        with self.assertRaises(ValueError):
+            opt.load_state_dict(bad_state)
+
     def test_step_runs(self):
         p = Tensor(np.array([1.0]), requires_grad=True)
         p.grad = np.array([1.0])

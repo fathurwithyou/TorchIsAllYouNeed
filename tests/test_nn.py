@@ -13,6 +13,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 matplotlib.use("Agg", force=True)
 
 from torchlike import Tensor, nn
+from torchlike.nn.ffnn import _clone_activation
 from torchlike.nn.linear import _initialize
 from torchlike.nn.module import Module
 
@@ -205,6 +206,13 @@ class TestSequential(unittest.TestCase):
 
 
 class TestFFNN(unittest.TestCase):
+    def test_clone_activation_variants(self):
+        relu = nn.ReLU()
+        self.assertIs(_clone_activation(relu), relu)
+        self.assertIsInstance(_clone_activation(nn.Sigmoid), nn.Sigmoid)
+        with self.assertRaises(TypeError):
+            _clone_activation(cast(Any, 123))
+
     def test_builds_from_layer_sizes_and_activation_names(self):
         model = nn.FFNN(
             [3, 4, 2],

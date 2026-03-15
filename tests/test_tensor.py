@@ -85,6 +85,18 @@ class TestTensorCore(unittest.TestCase):
         out.backward()
         np.testing.assert_allclose(x.grad, np.full((2, 2), 0.5))
 
+    def test_sum_backward_with_tuple_axes(self):
+        x = Tensor(np.arange(24.0).reshape(2, 3, 4), requires_grad=True)
+        out = x.sum(axis=(1, 2)).mean()
+        out.backward()
+        np.testing.assert_allclose(x.grad, np.full((2, 3, 4), 0.5))
+
+    def test_mean_backward_with_negative_axis_and_keepdims(self):
+        x = Tensor(np.arange(24.0).reshape(2, 3, 4), requires_grad=True)
+        out = x.mean(axis=-1, keepdims=True).sum()
+        out.backward()
+        np.testing.assert_allclose(x.grad, np.full((2, 3, 4), 0.25))
+
     def test_log_exp_tanh_relu_sigmoid_backward(self):
         x1 = Tensor(np.array([2.0]), requires_grad=True)
         x1.log().backward()

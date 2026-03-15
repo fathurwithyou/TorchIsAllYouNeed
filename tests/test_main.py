@@ -197,6 +197,12 @@ class TestMainUtilities(unittest.TestCase):
         self.assertEqual(len(weights), 2)
         self.assertEqual(len(grads), 2)
 
+    def test_collect_layer_distribution_without_bias(self):
+        model = nn.Sequential([nn.Linear(3, 2, bias=False, seed=0)])
+        values = main.collect_layer_distribution(model, use_grad=False)
+        self.assertEqual(len(values), 1)
+        self.assertEqual(values[0].shape, (6,))
+
     def test_save_and_reload_demo_model(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             p = Path(tmpdir) / "tiny_persistence_demo.pkl"
@@ -220,6 +226,43 @@ class TestMainUtilities(unittest.TestCase):
                 left, right, use_grad=False, output_path=p2, title="t"
             )
             self.assertTrue(p2.exists())
+
+    def test_plot_distribution_comparison_skips_when_no_linear_layers(self):
+        empty_left = main.ExperimentResult(
+            name="left",
+            model=nn.Sequential([nn.ReLU()]),
+            train_losses=[0.4],
+            val_losses=[0.4],
+            val_accs=[0.5],
+            final_val_loss=0.4,
+            final_val_acc=0.5,
+            val_probs=np.array([[0.6]]),
+            val_preds=np.array([[1.0]]),
+            best_epoch=1,
+        )
+        empty_right = main.ExperimentResult(
+            name="right",
+            model=nn.Sequential([nn.Sigmoid()]),
+            train_losses=[0.5],
+            val_losses=[0.5],
+            val_accs=[0.4],
+            final_val_loss=0.5,
+            final_val_acc=0.4,
+            val_probs=np.array([[0.4]]),
+            val_preds=np.array([[0.0]]),
+            best_epoch=1,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "no_layers.png"
+            main.plot_distribution_comparison(
+                empty_left,
+                empty_right,
+                use_grad=False,
+                output_path=output_path,
+                title="t",
+            )
+            self.assertFalse(output_path.exists())
 
     def test_first_epoch_below(self):
         self.assertEqual(main.first_epoch_below([0.9, 0.6, 0.3], 0.5), 3)
@@ -272,6 +315,77 @@ class TestMainUtilities(unittest.TestCase):
                     )
                 finally:
                     os.chdir(cwd)
+
+    def test_train_experiment_restores_best_params_after_early_stopping(self):
+        class TrackingOptimizer:
+            def __init__(self, params):
+                self.params = list(params)
+
+            def zero_grad(self):
+                for param in self.params:
+                    param.zero_grad()
+
+            def step(self):
+                for param in self.params:
+                    param.data += 1.0
+
+        model = nn.Sequential([nn.Linear(1, 1, init="zero", seed=0)])
+        x_train = np.array([[0.0], [1.0]])
+        y_train = np.array([[0.0], [1.0]])
+        x_val = np.array([[0.0]])
+        y_val = np.array([[1.0]])
+
+        eval_outputs = [
+            (1.2, 0.5, np.array([[0.5]]), np.array([[1.0]])),
+            (0.4, 0.75, np.array([[0.7]]), np.array([[1.0]])),
+            (1.3, 0.5, np.array([[0.5]]), np.array([[1.0]])),
+            (0.6, 0.50, np.array([[0.4]]), np.array([[0.0]])),
+            (0.4, 0.75, np.array([[0.7]]), np.array([[1.0]])),
+        ]
+        observed_params: list[tuple[np.ndarray, np.ndarray | None]] = []
+
+        def _capture_gradients(model_arg, *_args):
+            params = model_arg.parameters()
+            observed_params.append(
+                (
+                    params[0].data.copy(),
+                    params[1].data.copy() if len(params) > 1 else None,
+                )
+            )
+
+        with (
+            patch("main.build_binary_model", return_value=model),
+            patch(
+                "main.create_optimizer",
+                return_value=TrackingOptimizer(model.parameters()),
+            ),
+            patch("main.evaluate_binary", side_effect=eval_outputs),
+            patch("main.attach_full_batch_gradients", side_effect=_capture_gradients),
+        ):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = main.train_experiment(
+                    name="restore",
+                    x_train=x_train,
+                    y_train=y_train,
+                    x_val=x_val,
+                    y_val=y_val,
+                    use_rmsnorm=False,
+                    optimizer_name="sgd",
+                    epochs=4,
+                    batch_size=8,
+                    early_stopping_patience=1,
+                    min_delta=0.0,
+                )
+
+        self.assertEqual(result.best_epoch, 1)
+        self.assertEqual(len(result.val_losses), 2)
+        self.assertIn("early stopping at epoch 002", buf.getvalue())
+        self.assertEqual(len(observed_params), 1)
+        np.testing.assert_array_equal(observed_params[0][0], np.array([[1.0]]))
+        np.testing.assert_array_equal(observed_params[0][1], np.array([[1.0]]))
+        np.testing.assert_array_equal(model.layers[0].weight.data, np.array([[1.0]]))
+        np.testing.assert_array_equal(model.layers[0].bias.data, np.array([[1.0]]))
 
     def test_main_entrypoint_behaviors(self):
         buf = io.StringIO()
