@@ -446,28 +446,18 @@ def backward(self, grad: np.ndarray | None = None) -> None:
 \end{lstlisting}
 Semua \textit{loss} pada API layer \texttt{nn} pada akhirnya memanggil mekanisme \texttt{backward()} ini untuk menyebarkan gradien dari \textit{loss} skalar ke setiap parameter trainable. Pemisahan ini membuat antarmuka \texttt{nn} tetap ringkas, sementara detail diferensiasi tetap terkonsentrasi di backend \texttt{Tensor}.
 
-\paragraph{MSE sebagai negative log-likelihood Gaussian.}
+\paragraph{MSE untuk mengukur selisih prediksi dan target.}
 Untuk prediksi $\hat{y}$ dan target $y$, MSE dihitung sebagai
 \begin{equation}
 \mathcal{L}_{\mathrm{MSE}} = \frac{1}{N}\sum_{i=1}^N (\hat{y}_i-y_i)^2.
 \end{equation}
-Loss ini muncul secara alamiah jika diasumsikan
-\begin{equation}
-y_i = \hat{y}_i + \varepsilon_i,\qquad \varepsilon_i\sim\mathcal{N}(0,\sigma^2).
-\end{equation}
-Negatif log-likelihood Gaussian, dengan mengabaikan konstanta yang tidak bergantung pada parameter, adalah
-\begin{equation}
--\log p(\mathbf{y}\mid \hat{\mathbf{y}})
-=
-\frac{1}{2\sigma^2}\sum_{i=1}^{N}(y_i-\hat{y}_i)^2 + \mathrm{konstanta}.
-\end{equation}
-Jadi meminimalkan MSE ekuivalen dengan maximum likelihood di bawah noise Gaussian homogen. Gradien terhadap prediksi adalah
+MSE biasanya dipakai saat yang diprediksi berupa nilai kontinu. Intinya sederhana: model dihukum berdasarkan selisih antara prediksi dan target, lalu selisih itu dikuadratkan sehingga error yang besar terasa lebih berat. Jadi, kalau model meleset sedikit, hukumannya kecil. Kalau model meleset jauh, hukumannya naik lebih cepat. Gradien terhadap prediksi adalah
 \begin{equation}
 \frac{\partial \mathcal{L}_{\mathrm{MSE}}}{\partial \hat{y}_i}
 =
 \frac{2}{N}(\hat{y}_i-y_i),
 \end{equation}
-yang linier terhadap residual sehingga MSE sensitif terhadap outlier.
+yang langsung mengikuti selisih prediksi dan target. Karena error dikuadratkan, MSE juga cukup sensitif terhadap outlier.
 
 \noindent\textbf{Implementasi \texttt{MSELoss}}\par
 \begin{lstlisting}
@@ -501,24 +491,20 @@ def mean(self, axis=None, keepdims=False):
         denom = self.data.shape[axis]
     return self.sum(axis=axis, keepdims=keepdims) / denom
 \end{lstlisting}
-Pada MSE, operasi kuncinya adalah pengkuadratan elemen demi elemen lalu reduksi \texttt{mean}. Cuplikan ini memperlihatkan bagaimana gradien mengalir melalui aturan hasil kali dan pembagian oleh jumlah elemen saat \texttt{mean} dihitung.
+Pada MSE, operasi utamanya memang sederhana: hitung selisih, kuadratkan tiap elemen, lalu ambil rata-ratanya. Cuplikan ini menunjukkan bagaimana gradien mengalir lewat operasi perkalian dan pembagian saat \texttt{mean} dihitung.
 
-\paragraph{Binary Cross-Entropy sebagai negative log-likelihood Bernoulli.}
+\paragraph{Binary Cross-Entropy untuk klasifikasi biner.}
 Untuk klasifikasi biner dengan probabilitas prediksi $\hat{y}_i\in(0,1)$ dan target $y_i\in\{0,1\}$, BCE didefinisikan sebagai
 \begin{equation}
 \mathcal{L}_{\mathrm{BCE}} = -\frac{1}{N}\sum_{i=1}^N \left[y_i\log(\hat{y}_i)+(1-y_i)\log(1-\hat{y}_i)\right].
 \end{equation}
-Rumus ini adalah negative log-likelihood dari distribusi Bernoulli
-\begin{equation}
-p(y_i\mid \hat{y}_i)=\hat{y}_i^{y_i}(1-\hat{y}_i)^{1-y_i}.
-\end{equation}
-Mengambil log, menjumlahkan untuk seluruh sampel, dan mengalikan dengan tanda negatif langsung menghasilkan bentuk BCE. Turunan terhadap probabilitas prediksi adalah
+Intuisi BCE sebenarnya cukup sederhana. Jika label aslinya 1, model diharapkan memberi probabilitas yang mendekati 1. Jika label aslinya 0, model diharapkan memberi probabilitas yang mendekati 0. Jadi, semakin yakin model pada jawaban yang benar, loss akan makin kecil. Sebaliknya, jika model sangat yakin tetapi ternyata salah, loss akan naik cukup besar. Turunan terhadap probabilitas prediksi adalah
 \begin{equation}
 \frac{\partial \mathcal{L}_{\mathrm{BCE}}}{\partial \hat{y}_i}
 =
 -\frac{1}{N}\left(\frac{y_i}{\hat{y}_i}-\frac{1-y_i}{1-\hat{y}_i}\right).
 \end{equation}
-Karena ekspresi ini bersifat singular pada $\hat{y}_i=0$ atau $\hat{y}_i=1$, implementasi memakai \texttt{clamp} agar argumen log tetap berada pada interval yang aman. Jadi, secara statistik BCE memang cocok untuk keluaran probabilistik biner, tetapi secara numerik perhitungannya tetap harus dijaga dengan hati-hati.
+Rumus turunan ini menunjukkan bahwa perubahan loss sangat dipengaruhi oleh seberapa jauh probabilitas prediksi dari target yang benar. Karena ekspresi ini bermasalah saat $\hat{y}_i=0$ atau $\hat{y}_i=1$, implementasi memakai \texttt{clamp} agar argumen log tetap berada pada rentang yang aman. Jadi, BCE cocok untuk probabilitas biner, tetapi perhitungannya tetap perlu dijaga supaya stabil.
 
 \noindent\textbf{Implementasi \texttt{BCELoss}}\par
 \begin{lstlisting}
@@ -551,20 +537,20 @@ def log(self):
         if self.requires_grad and self.grad is not None:
             self.grad += out.grad / self.data
 \end{lstlisting}
-Gradien BCE mengalir melalui operasi \texttt{log} dan operasi linear di graph komputasi. \texttt{clamp} memberi mask gradien pada interval aman sehingga titik di luar rentang tidak mendorong pembaruan numerik yang tidak valid.
+Gradien BCE mengalir lewat operasi \texttt{log} dan operasi linear di graph komputasi. Peran \texttt{clamp} di sini sederhana tetapi penting: ia menjaga agar nilai yang dipakai tetap aman sehingga update numeriknya tidak rusak.
 
-\paragraph{Categorical Cross-Entropy untuk distribusi multikelas.}
+\paragraph{Categorical Cross-Entropy untuk multikelas.}
 Pada target one-hot $\mathbf{t}_i\in\{0,1\}^C$ dan probabilitas kelas $\mathbf{p}_i$, Categorical Cross-Entropy dihitung sebagai
 \begin{equation}
 \mathcal{L}_{\mathrm{CCE}} = -\frac{1}{N}\sum_{i=1}^N\sum_{c=1}^C t_{ic}\log p_{ic}.
 \end{equation}
-Loss ini merupakan negative log-likelihood dari distribusi kategorikal. Karena hanya satu komponen $t_{ic}$ bernilai 1 untuk tiap sampel, maka
+Untuk kasus multikelas, idenya mirip dengan BCE, hanya saja sekarang model harus membagi probabilitas ke beberapa kelas sekaligus. Karena target one-hot hanya punya satu komponen bernilai 1 pada tiap sampel, rumus ini bisa dibaca sebagai penalti pada probabilitas kelas yang benar. Akibatnya,
 \begin{equation}
 \mathcal{L}_{\mathrm{CCE}}
 =
 -\frac{1}{N}\sum_{i=1}^{N}\log p_{i,y_i},
 \end{equation}
-yaitu penalti langsung terhadap probabilitas yang diberikan model pada kelas benar. Kasus biner dapat dilihat sebagai kasus khusus CCE dengan $C=2$ sehingga BCE pada dasarnya adalah bentuk tereduksi dari cross-entropy kategorikal.
+yaitu model dihukum langsung berdasarkan seberapa kecil probabilitas yang ia berikan ke kelas benar. Kasus biner sendiri bisa dipandang sebagai versi khusus dari CCE saat jumlah kelas hanya dua, sehingga BCE pada dasarnya adalah bentuk yang lebih sederhana dari cross-entropy multikelas.
 
 \noindent\textbf{Implementasi \texttt{CrossEntropyLoss} pada graph \texttt{Tensor}}\par
 \begin{lstlisting}
@@ -582,7 +568,7 @@ class CrossEntropyLoss(_Loss):
             t = Tensor(target_np, requires_grad=False)
         return -(t * p.log()).sum(axis=1).mean()
 \end{lstlisting}
-Kode ini menerima dua format target, yaitu indeks kelas dan one-hot. Fleksibilitas ini membuat API pelatihan tetap konsisten di beberapa skenario eksperimen yang berbeda.
+Kode ini menerima dua format target, yaitu indeks kelas dan one-hot. Dengan begitu, API pelatihan tetap enak dipakai meskipun bentuk target pada eksperimen berbeda-beda.
 
 \noindent\textbf{Backward lokal tambahan pada \texttt{CrossEntropyLoss}}\par
 \begin{lstlisting}
@@ -603,7 +589,7 @@ def sum(self, axis=None, keepdims=False):
             grad = np.ones_like(self.data) * expanded
         self.grad += grad
 \end{lstlisting}
-Selain \texttt{clamp} dan \texttt{log} seperti pada BCE, CCE juga memakai \texttt{sum(axis=1)} untuk mengakumulasi kontribusi dari semua kelas. Pada tahap \textit{backward}, operasi \texttt{sum} menyiarkan gradien kembali ke tiap komponen kelas sebelum akhirnya dirata-ratakan oleh \texttt{mean}.
+Selain \texttt{clamp} dan \texttt{log} seperti pada BCE, CCE juga memakai \texttt{sum(axis=1)} untuk menjumlahkan kontribusi dari semua kelas. Saat \textit{backward}, operasi \texttt{sum} menyebarkan gradien kembali ke tiap komponen kelas sebelum akhirnya dirata-ratakan oleh \texttt{mean}.
 
 \noindent\textbf{Implementasi \texttt{cross\_entropy} stabil numerik dari logits}\par
 \begin{lstlisting}
@@ -616,33 +602,33 @@ if target.ndim == 1:
 elif target.ndim == 2 and target.shape == logits.shape:
     losses = -np.sum(target * log_probs, axis=1)
 \end{lstlisting}
-Operasi \texttt{shifted} merealisasikan trik \textit{log-sum-exp} sehingga perhitungan log-probabilitas tetap stabil ketika nilai logit besar. Struktur ini dipakai pada lapisan fungsional NumPy untuk validasi numerik di luar graph autodiff.
+Operasi \texttt{shifted} menjalankan trik \textit{log-sum-exp} supaya perhitungan log-probabilitas tetap stabil saat nilai logit besar. Bentuk ini dipakai pada lapisan fungsional NumPy untuk validasi numerik di luar graph autodiff.
 
 \paragraph{Mengapa cross-entropy selaras dengan sigmoid dan softmax.}
 Jika logits biner ditulis $z_i$ dan probabilitas diberikan oleh $\hat{y}_i=\sigma(z_i)$, maka untuk satu sampel
 \begin{equation}
 \ell(z_i,y_i)= -y_i\log \sigma(z_i) - (1-y_i)\log(1-\sigma(z_i)).
 \end{equation}
-Dengan menggunakan
+Kalau turunan sigmoid
 \begin{equation}
 \sigma'(z)=\sigma(z)(1-\sigma(z)),
 \end{equation}
-diperoleh turunan terhadap logit
+maka turunan loss terhadap logit menjadi
 \begin{equation}
 \frac{\partial \ell}{\partial z_i}=\sigma(z_i)-y_i.
 \end{equation}
-Hasil ini penting karena gradien terhadap logit menjadi sederhana dan tidak lagi memuat pembagian oleh $\hat{y}_i(1-\hat{y}_i)$. Untuk softmax multikelas dengan logits $\mathbf{z}_i$ dan probabilitas $\mathbf{p}_i=\mathrm{softmax}(\mathbf{z}_i)$, turunan serupa menghasilkan
+Bentuk ini enak karena gradien keluarannya jadi sederhana: prediksi dikurangi target. Jadi, selama prediksi model masih jauh dari label yang benar, gradiennya juga masih cukup jelas arahnya. Untuk kasus softmax multikelas, idenya tetap sama. Jika logits ditulis $\mathbf{z}_i$ dan probabilitasnya $\mathbf{p}_i=\mathrm{softmax}(\mathbf{z}_i)$, maka turunannya menjadi
 \begin{equation}
 \frac{\partial \ell}{\partial z_{ic}} = p_{ic}-t_{ic}.
 \end{equation}
-Identitas ini menjelaskan mengapa pasangan \textit{sigmoid + BCE} dan \textit{softmax + cross-entropy} sangat sering dipakai: keduanya menghasilkan gradien keluaran yang sederhana, stabil, dan langsung sebanding dengan selisih antara probabilitas prediksi dan target.
+Itulah alasan pasangan \textit{sigmoid + BCE} dan \textit{softmax + cross-entropy} sangat sering dipakai. Keduanya menghasilkan gradien keluaran yang bentuknya sederhana, stabil, dan mudah diinterpretasikan sebagai selisih antara prediksi model dan target.
 
 \paragraph{BCEWithLogitsLoss dan stabilitas numerik.}
-Alih-alih menghitung sigmoid terlebih dahulu lalu menerapkan BCE, implementasi ini menggunakan logit $z$ secara langsung:
+Di implementasi, sigmoid tidak dihitung dulu secara terpisah lalu baru dimasukkan ke BCE. Sebaliknya, yang dipakai langsung adalah logit $z$:
 \begin{equation}
 \mathcal{L}(z,y)=\max(z,0) - zy + \log\left(1+e^{-|z|}\right).
 \end{equation}
-Bentuk ini ekuivalen secara aljabar dengan BCE pada probabilitas sigmoid, tetapi lebih stabil secara numerik \citep{pytorch_bcewithlogitsloss}. Jika $z\ge 0$, maka $|z|=z$ dan
+Bentuk ini sebenarnya tetap setara dengan BCE biasa pada probabilitas sigmoid, hanya saja lebih aman secara numerik \citep{pytorch_bcewithlogitsloss}. Jika $z\ge 0$, maka $|z|=z$ dan
 \begin{equation}
 \mathcal{L}(z,y)= z-zy+\log(1+e^{-z}).
 \end{equation}
@@ -651,11 +637,11 @@ Karena
 \log \sigma(z)= -\log(1+e^{-z}),\qquad
 \log(1-\sigma(z))= -z-\log(1+e^{-z}),
 \end{equation}
-bentuk di atas identik dengan BCE standar. Jika $z<0$, maka $|z|=-z$ dan
+bentuk di atas sama saja dengan BCE standar. Jika $z<0$, maka $|z|=-z$ dan
 \begin{equation}
 \mathcal{L}(z,y)= -zy+\log(1+e^{z}),
 \end{equation}
-yang sekali lagi identik dengan ekspresi BCE setelah substitusi sigmoid. Keuntungan utamanya adalah kita tidak perlu menghitung $e^{z}$ untuk $z\gg 0$ atau $e^{-z}$ untuk $z\ll 0$ secara tidak terkendali sehingga risiko \textit{overflow} dan \textit{underflow} berkurang drastis.
+yang juga memberi bentuk BCE yang sama. Intinya, rumus ini dipilih bukan karena objective-nya berbeda, tetapi karena cara menghitungnya lebih stabil. Kita tidak perlu berhadapan langsung dengan $e^{z}$ saat $z$ sangat besar atau $e^{-z}$ saat $z$ sangat kecil, sehingga risiko \textit{overflow} dan \textit{underflow} bisa dikurangi.
 
 \noindent\textbf{Implementasi \texttt{BCEWithLogitsLoss} pada graph \texttt{Tensor}}\par
 \begin{lstlisting}
@@ -1172,12 +1158,12 @@ Dataset dipisahkan secara \textit{stratified hold-out} menjadi 80\% data latih d
 
 Konfigurasi acuan eksperimen adalah FFNN klasifikasi biner dengan tiga hidden layer berukuran 32, urutan aktivasi GELU--SELU--GELU, inisialisasi He, optimizer SGD dengan \textit{learning rate} 0.03, regularisasi L2 sebesar $10^{-4}$, batch size 256, horizon pelatihan 160 epoch, serta seed tetap 123 untuk inisialisasi dan pengacakan \textit{mini-batch}. \textit{Loss} utama yang digunakan adalah \texttt{BCEWithLogitsLoss}. Pemilihan \textit{loss} ini juga cukup natural karena targetnya biner dan model menghasilkan logit skalar. Jadi, objective yang dipakai memang cocok dengan bentuk keluaran model dan tetap aman secara numerik.
 
-Secara formal, untuk parameter $\theta$, data validasi $\{(x_i,y_i)\}_{i=1}^{n_{\mathrm{val}}}$, dan probabilitas prediksi $p_\theta(x_i)$, dua metrik utama yang dicatat adalah
+Dua metrik utama yang dicatat pada data validasi adalah akurasi dan \textit{validation loss}. Jika probabilitas prediksi ditulis sebagai $p_\theta(x_i)$, maka label prediksi dan akurasi dapat ditulis sebagai
 \begin{align}
 \hat{y}_i(\theta) &= \mathbb{I}\!\left[p_\theta(x_i)\ge 0.5\right],\\
 \mathrm{Acc}(\theta) &= \frac{1}{n_{\mathrm{val}}}\sum_{i=1}^{n_{\mathrm{val}}}\mathbb{I}\!\left[\hat{y}_i(\theta)=y_i\right],
 \end{align}
-serta
+Sedangkan \textit{validation loss}-nya ditulis sebagai
 \begin{equation}
 \mathcal{L}_{\mathrm{val}}(\theta)=
 -\frac{1}{n_{\mathrm{val}}}\sum_{i=1}^{n_{\mathrm{val}}}
